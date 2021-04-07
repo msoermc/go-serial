@@ -132,12 +132,6 @@ func (port *windowsPort) ReadWithContext(ctx context.Context, p []byte) (int, er
 	}
 	defer syscall.CloseHandle(ev.HEvent)
 	for {
-		// Check if context is expired
-		select {
-		case <- ctx.Done():
-			return 0, nil
-		}
-
 		err := syscall.ReadFile(port.handle, p, &readed, ev)
 		switch err {
 		case nil:
@@ -168,6 +162,12 @@ func (port *windowsPort) ReadWithContext(ctx context.Context, p []byte) (int, er
 		if err := setCommState(port.handle, params); err != nil {
 			port.Close()
 			return 0, err
+		}
+
+		// Check if context is expired
+		select {
+		case <- ctx.Done():
+			return 0, nil
 		}
 	}
 }
