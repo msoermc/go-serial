@@ -120,7 +120,8 @@ func (port *windowsPort) Read(p []byte) (int, error) {
 func (port *windowsPort) ReadWithContext(ctx context.Context, p []byte) (int, error) {
 	// Set timeout to one second if using nil context
 	if ctx == nil {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
 	}
 
