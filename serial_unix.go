@@ -9,11 +9,13 @@
 package serial
 
 import (
+	"context"
 	"io/ioutil"
 	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"go.bug.st/serial/unixutils"
 	"golang.org/x/sys/unix"
@@ -63,6 +65,48 @@ func (port *unixPort) Read(p []byte) (int, error) {
 
 	fds := unixutils.NewFDSet(port.handle, port.closeSignal.ReadFD())
 	for {
+		res, err := unixutils.Select(fds, nil, fds, -1)
+		if err == unix.EINTR {
+			continue
+		}
+		if err != nil {
+			return 0, err
+		}
+		if res.IsReadable(port.closeSignal.ReadFD()) {
+			return 0, &PortError{code: PortClosed}
+		}
+		n, err := unix.Read(port.handle, p)
+		if err == unix.EINTR {
+			continue
+		}
+		if n < 0 { // Do not return -1 unix errors
+			n = 0
+		}
+		return n, err
+	}
+}
+
+func (port *unixPort) ReadWithContext(ctx context.Context, p []byte) (int, error) {
+	// Set timeout to one second if using nil context
+	if ctx == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+	}
+
+	port.closeLock.RLock()
+	defer port.closeLock.RUnlock()
+	if atomic.LoadUint32(&port.opened) != 1 {
+		return 0, &PortError{code: PortClosed}
+	}
+
+	fds := unixutils.NewFDSet(port.handle, port.closeSignal.ReadFD())
+	for {
+		// Check if context is expired
+		select {
+		case <- ctx.Done():
+			return 0, nil
+		}
+
 		res, err := unixutils.Select(fds, nil, fds, -1)
 		if err == unix.EINTR {
 			continue

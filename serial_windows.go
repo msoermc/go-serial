@@ -18,8 +18,10 @@ package serial
 */
 
 import (
+	"context"
 	"syscall"
 	"sync"
+	"time"
 )
 
 type windowsPort struct {
@@ -81,6 +83,60 @@ func (port *windowsPort) Read(p []byte) (int, error) {
 	}
 	defer syscall.CloseHandle(ev.HEvent)
 	for {
+		err := syscall.ReadFile(port.handle, p, &readed, ev)
+		switch err {
+		case nil:
+			// operation completed successfully
+		case syscall.ERROR_IO_PENDING:
+			// wait for overlapped I/O to complete
+			if err := getOverlappedResult(port.handle, ev, &readed, true); err != nil {
+				return int(readed), err
+			}
+		default:
+			// error happened
+			return int(readed), err
+		}
+
+		if readed > 0 {
+			return int(readed), nil
+		}
+		if err := resetEvent(ev.HEvent); err != nil {
+			return 0, err
+		}
+
+		// At the moment it seems that the only reliable way to check if
+		// a serial port is alive in Windows is to check if the SetCommState
+		// function fails.
+
+		params := &dcb{}
+		getCommState(port.handle, params)
+		if err := setCommState(port.handle, params); err != nil {
+			port.Close()
+			return 0, err
+		}
+	}
+}
+
+func (port *windowsPort) ReadWithContext(ctx context.Context, p []byte) (int, error) {
+	// Set timeout to one second if using nil context
+	if ctx == nil {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+	}
+
+	var readed uint32
+	ev, err := createOverlappedEvent()
+	if err != nil {
+		return 0, err
+	}
+	defer syscall.CloseHandle(ev.HEvent)
+	for {
+		// Check if context is expired
+		select {
+		case <- ctx.Done():
+			return 0, nil
+		}
+
 		err := syscall.ReadFile(port.handle, p, &readed, ev)
 		switch err {
 		case nil:
