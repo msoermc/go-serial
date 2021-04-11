@@ -106,6 +106,7 @@ func (port *unixPort) ReadWithContext(ctx context.Context, p []byte) (int, error
 		select {
 		case <- ctx.Done():
 			return 0, nil
+		default:
 		}
 
 		res, err := unixutils.Select(fds, nil, fds, -1)
